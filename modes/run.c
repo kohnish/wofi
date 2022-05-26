@@ -15,217 +15,208 @@
     along with Wofi.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
+#include <dirent.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
 #include <unistd.h>
 
 #include <sys/stat.h>
 
-#include <utils.h>
 #include <config.h>
+#include <utils.h>
 #include <wofi_api.h>
 
-static const char* arg_names[] = {"always_parse_args", "show_all", "print_command"};
+static const char *arg_names[] = {"always_parse_args", "show_all", "print_command"};
 
 static bool always_parse_args;
 static bool show_all;
 static bool print_command;
-static struct mode* mode;
-static const char* arg_str = "__args";
+static struct mode *mode;
+static const char *arg_str = "__args";
 
 struct node {
-	struct widget* widget;
-	struct wl_list link;
+    struct widget *widget;
+    struct wl_list link;
 };
 
 static struct wl_list widgets;
 
-void wofi_run_init(struct mode* this, struct map* config) {
-	mode = this;
-	always_parse_args = strcmp(config_get(config, arg_names[0], "false"), "true") == 0;
-	show_all = strcmp(config_get(config, arg_names[1], "true"), "true") == 0;
-	print_command = strcmp(config_get(config, arg_names[2], "false"), "true") == 0;
+void wofi_run_init(struct mode *this, struct map *config) {
+    mode = this;
+    always_parse_args = strcmp(config_get(config, arg_names[0], "false"), "true") == 0;
+    show_all = strcmp(config_get(config, arg_names[1], "true"), "true") == 0;
+    print_command = strcmp(config_get(config, arg_names[2], "false"), "true") == 0;
 
-	wl_list_init(&widgets);
+    wl_list_init(&widgets);
 
-	struct map* cached = map_init();
-	struct wl_list* cache = wofi_read_cache(mode);
+    struct map *cached = map_init();
+    struct wl_list *cache = wofi_read_cache(mode);
 
-	struct map* entries = map_init();
+    struct map *entries = map_init();
 
-	struct cache_line* node, *tmp;
-	wl_list_for_each_safe(node, tmp, cache, link) {
-		char* text = node->line;
-		if(strncmp(node->line, arg_str, strlen(arg_str)) == 0) {
-			text = strchr(text, ' ') + 1;
-		}
+    struct cache_line *node, *tmp;
+    wl_list_for_each_safe(node, tmp, cache, link) {
+        char *text = node->line;
+        if (strncmp(node->line, arg_str, strlen(arg_str)) == 0) {
+            text = strchr(text, ' ') + 1;
+        }
 
-		char* full_path = text;
+        char *full_path = text;
 
-		char* final_slash = strrchr(text, '/');
-		if(final_slash != NULL) {
-			text = final_slash + 1;
-		}
+        char *final_slash = strrchr(text, '/');
+        if (final_slash != NULL) {
+            text = final_slash + 1;
+        }
 
-		struct stat info;
-		stat(node->line, &info);
-		if(((access(node->line, X_OK) == 0 && S_ISREG(info.st_mode)) ||
-				strncmp(node->line, arg_str, strlen(arg_str)) == 0) && !map_contains(cached, full_path)) {
-			struct node* widget = malloc(sizeof(struct node));
-			widget->widget = wofi_create_widget(mode, &text, text, &node->line, 1);
-			wl_list_insert(&widgets, &widget->link);
-			map_put(cached, full_path, "true");
-			map_put(entries, text, "true");
-		} else {
-			wofi_remove_cache(mode, node->line);
-		}
-		free(node->line);
-		wl_list_remove(&node->link);
-		free(node);
-	}
+        struct stat info;
+        stat(node->line, &info);
+        if (((access(node->line, X_OK) == 0 && S_ISREG(info.st_mode)) || strncmp(node->line, arg_str, strlen(arg_str)) == 0) && !map_contains(cached, full_path)) {
+            struct node *widget = malloc(sizeof(struct node));
+            widget->widget = wofi_create_widget(mode, &text, text, &node->line, 1);
+            wl_list_insert(&widgets, &widget->link);
+            map_put(cached, full_path, "true");
+            map_put(entries, text, "true");
+        } else {
+            wofi_remove_cache(mode, node->line);
+        }
+        free(node->line);
+        wl_list_remove(&node->link);
+        free(node);
+    }
 
-	free(cache);
+    free(cache);
 
-	char* path = strdup(getenv("PATH"));
+    char *path = strdup(getenv("PATH"));
 
-	struct map* paths = map_init();
+    struct map *paths = map_init();
 
-	char* save_ptr;
-	char* str = strtok_r(path, ":", &save_ptr);
-	do {
+    char *save_ptr;
+    char *str = strtok_r(path, ":", &save_ptr);
+    do {
 
-		str = realpath(str, NULL);
-		if(str == NULL) {
-			continue;
-		}
-		if(map_contains(paths, str)) {
-			free(str);
-			continue;
-		}
+        str = realpath(str, NULL);
+        if (str == NULL) {
+            continue;
+        }
+        if (map_contains(paths, str)) {
+            free(str);
+            continue;
+        }
 
-		map_put(paths, str, "true");
+        map_put(paths, str, "true");
 
-		DIR* dir = opendir(str);
-		if(dir == NULL) {
-			continue;
-		}
-		struct dirent* entry;
-		while((entry = readdir(dir)) != NULL) {
-			if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-				continue;
-			}
-			char* full_path = utils_concat(3, str, "/", entry->d_name);
-			struct stat info;
-			stat(full_path, &info);
-			if(access(full_path, X_OK) == 0 && S_ISREG(info.st_mode) &&
-					!map_contains(cached, full_path) &&
-					(show_all || !map_contains(entries, entry->d_name))) {
-				char* text = strdup(entry->d_name);
-				map_put(entries, text, "true");
-				struct node* widget = malloc(sizeof(struct node));
-				widget->widget = wofi_create_widget(mode, &text, text, &full_path, 1);
-				wl_list_insert(&widgets, &widget->link);
-				free(text);
-			}
-			free(full_path);
-		}
-		free(str);
-		closedir(dir);
-	} while((str = strtok_r(NULL, ":", &save_ptr)) != NULL);
-	free(path);
-	map_free(paths);
-	map_free(cached);
-	map_free(entries);
+        DIR *dir = opendir(str);
+        if (dir == NULL) {
+            continue;
+        }
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            char *full_path = utils_concat(3, str, "/", entry->d_name);
+            struct stat info;
+            stat(full_path, &info);
+            if (access(full_path, X_OK) == 0 && S_ISREG(info.st_mode) && !map_contains(cached, full_path) && (show_all || !map_contains(entries, entry->d_name))) {
+                char *text = strdup(entry->d_name);
+                map_put(entries, text, "true");
+                struct node *widget = malloc(sizeof(struct node));
+                widget->widget = wofi_create_widget(mode, &text, text, &full_path, 1);
+                wl_list_insert(&widgets, &widget->link);
+                free(text);
+            }
+            free(full_path);
+        }
+        free(str);
+        closedir(dir);
+    } while ((str = strtok_r(NULL, ":", &save_ptr)) != NULL);
+    free(path);
+    map_free(paths);
+    map_free(cached);
+    map_free(entries);
 }
 
-struct widget* wofi_run_get_widget(void) {
-	struct node* node, *tmp;
-	wl_list_for_each_reverse_safe(node, tmp, &widgets, link) {
-		struct widget* widget = node->widget;
-		wl_list_remove(&node->link);
-		free(node);
-		return widget;
-	}
-	return NULL;
+struct widget *wofi_run_get_widget(void) {
+    struct node *node, *tmp;
+    wl_list_for_each_reverse_safe(node, tmp, &widgets, link) {
+        struct widget *widget = node->widget;
+        wl_list_remove(&node->link);
+        free(node);
+        return widget;
+    }
+    return NULL;
 }
 
-static char* parse_args(const char* cmd, size_t* space_count) {
-	size_t cmd_l = strlen(cmd);
-	char* ret = calloc(1, cmd_l + 1);
+static char *parse_args(const char *cmd, size_t *space_count) {
+    size_t cmd_l = strlen(cmd);
+    char *ret = calloc(1, cmd_l + 1);
 
-	bool in_quote = false;
-	size_t ret_count = 0;
-	for(size_t count = 0; count < cmd_l; ++count) {
-		if(cmd[count] == ' ' && !in_quote) {
-			++*space_count;
-			ret[ret_count++] = '\n';
-			continue;
-		}
+    bool in_quote = false;
+    size_t ret_count = 0;
+    for (size_t count = 0; count < cmd_l; ++count) {
+        if (cmd[count] == ' ' && !in_quote) {
+            ++*space_count;
+            ret[ret_count++] = '\n';
+            continue;
+        }
 
-		if(cmd[count] == '"') {
-			in_quote = !in_quote;
-			continue;
-		}
+        if (cmd[count] == '"') {
+            in_quote = !in_quote;
+            continue;
+        }
 
-		if(cmd[count] == '\\') {
-			++count;
-		}
-		ret[ret_count++] = cmd[count];
-	}
+        if (cmd[count] == '\\') {
+            ++count;
+        }
+        ret[ret_count++] = cmd[count];
+    }
 
-	return ret;
+    return ret;
 }
 
-void wofi_run_exec(const char* cmd) {
-	bool arg_run = wofi_mod_control() || always_parse_args;
-	if(strncmp(cmd, arg_str, strlen(arg_str)) == 0) {
-		arg_run = true;
-		cmd = strchr(cmd, ' ') + 1;
-	}
+void wofi_run_exec(const char *cmd) {
+    bool arg_run = wofi_mod_control() || always_parse_args;
+    if (strncmp(cmd, arg_str, strlen(arg_str)) == 0) {
+        arg_run = true;
+        cmd = strchr(cmd, ' ') + 1;
+    }
 
-	if(wofi_mod_shift()) {
-		wofi_write_cache(mode, cmd);
-		wofi_term_run(cmd);
-	}
-	if(print_command) {
-		printf("%s\n", cmd);
-		exit(0);
-	}
-	if(arg_run) {
-		size_t space_count = 2;
-		char* tmp = parse_args(cmd, &space_count);
+    if (wofi_mod_shift()) {
+        wofi_write_cache(mode, cmd);
+        wofi_term_run(cmd);
+    }
+    if (print_command) {
+        printf("%s\n", cmd);
+        exit(0);
+    }
+    if (arg_run) {
+        size_t space_count = 2;
+        char *tmp = parse_args(cmd, &space_count);
 
-		char** args = malloc(space_count * sizeof(char*));
-		char* save_ptr;
-		char* str = strtok_r(tmp, "\n", &save_ptr);
-		size_t count = 0;
-		do {
-			args[count++] = str;
-		} while((str = strtok_r(NULL, "\n", &save_ptr)) != NULL);
-		args[space_count - 1] = NULL;
-		char* cache = utils_concat(2, "__args ", cmd);
-		wofi_write_cache(mode, cache);
-		free(cache);
-		execvp(tmp, args);
-	} else {
-		wofi_write_cache(mode, cmd);
-		execl(cmd, cmd, NULL);
-	}
-	fprintf(stderr, "%s cannot be executed %s\n", cmd, strerror(errno));
-	exit(errno);
+        char **args = malloc(space_count * sizeof(char *));
+        char *save_ptr;
+        char *str = strtok_r(tmp, "\n", &save_ptr);
+        size_t count = 0;
+        do {
+            args[count++] = str;
+        } while ((str = strtok_r(NULL, "\n", &save_ptr)) != NULL);
+        args[space_count - 1] = NULL;
+        char *cache = utils_concat(2, "__args ", cmd);
+        wofi_write_cache(mode, cache);
+        free(cache);
+        execvp(tmp, args);
+    } else {
+        wofi_write_cache(mode, cmd);
+        execl(cmd, cmd, NULL);
+    }
+    fprintf(stderr, "%s cannot be executed %s\n", cmd, strerror(errno));
+    exit(errno);
 }
 
-const char** wofi_run_get_arg_names(void) {
-	return arg_names;
-}
+const char **wofi_run_get_arg_names(void) { return arg_names; }
 
-size_t wofi_run_get_arg_count(void) {
-	return sizeof(arg_names) / sizeof(char*);
-}
+size_t wofi_run_get_arg_count(void) { return sizeof(arg_names) / sizeof(char *); }
 
-bool wofi_run_no_entry(void) {
-	return true;
-}
+bool wofi_run_no_entry(void) { return true; }
