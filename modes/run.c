@@ -188,31 +188,25 @@ void wofi_run_exec(const char *cmd) {
         wofi_term_run(cmd);
     }
     if (print_command) {
-        printf("%s\n", cmd);
+        printf("%s %i\n", cmd, arg_run);
         exit(0);
     }
-    if (arg_run) {
-        size_t space_count = 2;
-        char *tmp = parse_args(cmd, &space_count);
+    size_t space_count = 2;
+    char *tmp = parse_args(cmd, &space_count);
 
-        char **args = malloc(space_count * sizeof(char *));
-        char *save_ptr;
-        char *str = strtok_r(tmp, "\n", &save_ptr);
-        size_t count = 0;
-        do {
-            args[count++] = str;
-        } while ((str = strtok_r(NULL, "\n", &save_ptr)) != NULL);
-        args[space_count - 1] = NULL;
-        char *cache = utils_concat(2, "__args ", cmd);
-        wofi_write_cache(mode, cache);
-        free(cache);
-        execvp(tmp, args);
-    } else {
-        wofi_write_cache(mode, cmd);
-        execl(cmd, cmd, NULL);
-    }
-    fprintf(stderr, "%s cannot be executed %s\n", cmd, strerror(errno));
-    exit(errno);
+    char **args = malloc(space_count * sizeof(char *));
+    char *save_ptr;
+    char *str = strtok_r(tmp, "\n", &save_ptr);
+    size_t count = 0;
+    do {
+        args[count++] = str;
+    } while ((str = strtok_r(NULL, "\n", &save_ptr)) != NULL);
+    args[space_count - 1] = NULL;
+    char *cache = utils_concat(2, "__args ", cmd);
+    wofi_write_cache(mode, cache);
+    free(cache);
+    system(cmd);
+    exit(0);
 }
 
 const char **wofi_run_get_arg_names(void) { return arg_names; }
